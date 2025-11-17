@@ -2,14 +2,20 @@ pipeline {
     agent any
 
     tools {
-        maven 'M2'
-        jdk 'JDK21'
+        maven 'M3'
+        jdk 'JDK17'
     }
 
     stages {
         stage('Checkout') {
             steps {
-                checkout scm
+                git(
+                        url: 'https://github.com/BadrFTW/studentManagement.git',
+                        branch: 'main',
+                        credentialsId: 'github-token',
+                        changelog: true,
+                        poll: true
+                )
             }
         }
 
