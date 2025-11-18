@@ -30,7 +30,16 @@ pipeline {
             }
         }
 
-
+        stage('Tests') {
+            steps {
+                sh 'mvn test'
+            }
+            post {
+                always {
+                    junit 'target/surefire-reports/*.xml'
+                }
+            }
+        }
 
         stage('Package') {
             steps {
@@ -41,7 +50,11 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    docker.build("${DOCKER_IMAGE}:${env.BUILD_ID}")
+                    // Vérifier que le JAR existe
+                    sh 'ls -la target/*.jar'
+
+                    // Construire l'image Docker
+                    sh "docker build -t ${DOCKER_IMAGE}:${env.BUILD_ID} ."
                     sh "docker tag ${DOCKER_IMAGE}:${env.BUILD_ID} ${DOCKER_IMAGE}:latest"
                 }
             }
@@ -55,7 +68,9 @@ pipeline {
                             usernameVariable: 'DOCKER_USER',
                             passwordVariable: 'DOCKER_PASSWORD'
                     )]) {
-                        sh "docker login -u ${DOCKER_USER} -p ${DOCKER_PASSWORD} ${DOCKER_REGISTRY}"
+                        sh """
+                            docker login -u ${DOCKER_USER} -p ${DOCKER_PASSWORD} ${DOCKER_REGISTRY}
+                        """
                     }
                 }
             }
@@ -64,8 +79,11 @@ pipeline {
         stage('Docker Push') {
             steps {
                 script {
-                    sh "docker push ${DOCKER_IMAGE}:${env.BUILD_ID}"
-                    sh "docker push ${DOCKER_IMAGE}:latest"
+                    // Tag avec le nom d'utilisateur complet si nécessaire
+                    sh """
+                        docker push ${DOCKER_IMAGE}:${env.BUILD_ID}
+                        docker push ${DOCKER_IMAGE}:latest
+                    """
                 }
             }
         }
@@ -81,11 +99,15 @@ pipeline {
         always {
             echo 'Pipeline terminée'
             // Nettoyage Docker
-            sh 'docker logout || true'
-            sh 'docker system prune -f || true'
+            script {
+                sh 'docker logout || true'
+                sh 'docker system prune -f || true'
+            }
         }
         success {
             echo 'Build et déploiement Docker réussis!'
+            // Afficher les images poussées
+            echo "Images disponibles: ${DOCKER_IMAGE}:${env.BUILD_ID} et ${DOCKER_IMAGE}:latest"
         }
         failure {
             echo 'Build échoué!'
