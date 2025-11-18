@@ -7,7 +7,7 @@ pipeline {
     }
 
     environment {
-        DOCKER_IMAGE = 'badrftw/alpine'
+        DOCKER_IMAGE = 'badrftw/student-management'
         DOCKER_REGISTRY = 'docker.io'
     }
 
