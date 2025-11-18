@@ -7,7 +7,7 @@ pipeline {
     }
 
     environment {
-        DOCKER_IMAGE = 'monusername/student-management'
+        DOCKER_IMAGE = 'badrftw/alpine'
         DOCKER_REGISTRY = 'docker.io'
     }
 
@@ -29,8 +29,6 @@ pipeline {
                 sh 'mvn clean compile'
             }
         }
-
-
 
         stage('Package') {
             steps {
@@ -70,7 +68,6 @@ pipeline {
         stage('Docker Push') {
             steps {
                 script {
-                    // Tag avec le nom d'utilisateur complet si nécessaire
                     sh """
                         docker push ${DOCKER_IMAGE}:${env.BUILD_ID}
                         docker push ${DOCKER_IMAGE}:latest
@@ -97,7 +94,6 @@ pipeline {
         }
         success {
             echo 'Build et déploiement Docker réussis!'
-            // Afficher les images poussées
             echo "Images disponibles: ${DOCKER_IMAGE}:${env.BUILD_ID} et ${DOCKER_IMAGE}:latest"
         }
         failure {
