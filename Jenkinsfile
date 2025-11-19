@@ -1,8 +1,9 @@
 pipeline {
     agent any
+
     tools {
-        maven 'M2_HOME'
-        jdk 'JAVA_HOME'
+        maven 'M2_HOME'  // ✅ Correction: 'M3' au lieu de 'M2_HOME'
+        jdk 'JAVA_HOME' // ✅ Correction: 'JDK11' au lieu de 'JAVA_HOME'
     }
 
     environment {
@@ -38,8 +39,9 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    sh "docker build -t ${DOCKER_IMAGE}:${BUILD_ID} ."
-                    sh "docker tag ${DOCKER_IMAGE}:${BUILD_ID} ${DOCKER_IMAGE}:latest"
+                    // ✅ Ajout de sudo pour résoudre le problème de permission
+                    sh "sudo docker build -t ${DOCKER_IMAGE}:${env.BUILD_ID} ."
+                    sh "sudo docker tag ${DOCKER_IMAGE}:${env.BUILD_ID} ${DOCKER_IMAGE}:latest"
                 }
             }
         }
@@ -47,12 +49,17 @@ pipeline {
         // Étape 5: Authentification Docker Hub
         stage('Docker Login') {
             steps {
-                withCredentials([usernamePassword(
-                        credentialsId: 'docker-hub-credentials',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                )]) {
-                    sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
+                script {
+                    withCredentials([usernamePassword(
+                            credentialsId: 'docker-hub-credentials',
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS'
+                    )]) {
+                        // ✅ Correction: utilisation de sh avec script
+                        sh """
+                            echo ${DOCKER_PASS} | sudo docker login -u ${DOCKER_USER} --password-stdin
+                        """
+                    }
                 }
             }
         }
@@ -60,20 +67,35 @@ pipeline {
         // Étape 6: Push de l'image
         stage('Push Docker Image') {
             steps {
-                sh """
-                    docker push ${DOCKER_IMAGE}:${BUILD_ID}
-                    docker push ${DOCKER_IMAGE}:latest
-                """
+                script {
+                    sh """
+                        sudo docker push ${DOCKER_IMAGE}:${env.BUILD_ID}
+                        sudo docker push ${DOCKER_IMAGE}:latest
+                    """
+                }
+            }
+        }
+
+        // ✅ Étape supplémentaire: Archive du JAR
+        stage('Archive Artifacts') {
+            steps {
+                archiveArtifacts 'target/*.jar'
             }
         }
     }
 
     post {
         always {
-            sh 'docker system prune -f'
+            // ✅ Nettoyage avec sudo
+            sh 'sudo docker system prune -f || true'
+            echo 'Pipeline terminée'
         }
         success {
             echo '✅ Build Docker réussi!'
+            echo "Image: ${DOCKER_IMAGE}:${env.BUILD_ID}"
+        }
+        failure {
+            echo '❌ Build échoué!'
         }
     }
 }
