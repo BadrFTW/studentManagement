@@ -1,13 +1,4 @@
-# Étape de build
-FROM maven:3.8.6-openjdk-11 AS builder
-WORKDIR /app
-COPY pom.xml .
-COPY src ./src
-RUN mvn clean package -DskipTests
-
-# Étape d'exécution
+# Version corrigée avec tags valides
 FROM openjdk:11-jre-slim
-WORKDIR /app
-COPY --from=builder /app/target/*.jar app.jar
-EXPOSE 8080
-ENTRYPOINT ["java","-jar","app.jar"]
+COPY target/*.jar app.jar
+ENTRYPOINT ["java","-jar","/app.jar"]
