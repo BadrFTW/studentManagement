@@ -7,9 +7,7 @@ RUN mvn clean package -DskipTests
 
 # Étape d'exécution
 FROM openjdk:11-jre-slim
-RUN groupadd -r spring && useradd -r -g spring spring
-USER spring
 WORKDIR /app
-COPY --from=builder --chown=spring:spring /app/target/*.jar app.jar
+COPY --from=builder /app/target/*.jar app.jar
 EXPOSE 8080
-ENTRYPOINT ["java","-jar","/app.jar"]
+ENTRYPOINT ["java","-jar","app.jar"]
