@@ -1,4 +1,8 @@
-# OPTION 1: Tag standard (fonctionne toujours)
-FROM openjdk:11
+FROM eclipse-temurin:11-jre
+
+WORKDIR /app
 COPY target/*.jar app.jar
-ENTRYPOINT ["java","-jar","/app.jar"]
+
+EXPOSE 8080
+
+ENTRYPOINT ["java", "-jar", "app.jar"]
