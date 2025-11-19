@@ -1,8 +1,7 @@
 pipeline {
     agent any
-
     tools {
-        maven 'M2_HOME'
+        maven 'M3'
         jdk 'JAVA_HOME'
     }
 
@@ -12,92 +11,69 @@ pipeline {
     }
 
     stages {
-        stage('Checkout') {
+        // Étape 1: Récupération du code
+        stage('Checkout Git') {
             steps {
-                git(
+                git branch: 'main',
                         url: 'https://github.com/BadrFTW/studentManagement.git',
-                        branch: 'main',
-                        credentialsId: 'github-token',
-                        changelog: true,
-                        poll: true
-                )
+                        credentialsId: 'github-token'
             }
         }
 
-        stage('Build') {
+        // Étape 2: Compilation
+        stage('Build Maven') {
             steps {
                 sh 'mvn clean compile'
             }
         }
 
-        stage('Package') {
+        // Étape 3: Packaging
+        stage('Package JAR') {
             steps {
                 sh 'mvn package -DskipTests'
             }
         }
 
+        // Étape 4: Construction image Docker
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Vérifier que le JAR existe
-                    sh 'ls -la target/*.jar'
-
-                    // Construire l'image Docker
-                    sh "docker build -t ${DOCKER_IMAGE}:${env.BUILD_ID} ."
-                    sh "docker tag ${DOCKER_IMAGE}:${env.BUILD_ID} ${DOCKER_IMAGE}:latest"
+                    sh "docker build -t ${DOCKER_IMAGE}:${BUILD_ID} ."
+                    sh "docker tag ${DOCKER_IMAGE}:${BUILD_ID} ${DOCKER_IMAGE}:latest"
                 }
             }
         }
 
+        // Étape 5: Authentification Docker Hub
         stage('Docker Login') {
             steps {
-                script {
-                    withCredentials([usernamePassword(
-                            credentialsId: 'docker-hub-credentials',
-                            usernameVariable: 'DOCKER_USER',
-                            passwordVariable: 'DOCKER_PASSWORD'
-                    )]) {
-                        sh """
-                            docker login -u ${DOCKER_USER} -p ${DOCKER_PASSWORD} ${DOCKER_REGISTRY}
-                        """
-                    }
+                withCredentials([usernamePassword(
+                        credentialsId: 'docker-hub-credentials',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
                 }
             }
         }
 
-        stage('Docker Push') {
+        // Étape 6: Push de l'image
+        stage('Push Docker Image') {
             steps {
-                script {
-                    sh """
-                        docker push ${DOCKER_IMAGE}:${env.BUILD_ID}
-                        docker push ${DOCKER_IMAGE}:latest
-                    """
-                }
-            }
-        }
-
-        stage('Archive') {
-            steps {
-                archiveArtifacts 'target/*.jar'
+                sh """
+                    docker push ${DOCKER_IMAGE}:${BUILD_ID}
+                    docker push ${DOCKER_IMAGE}:latest
+                """
             }
         }
     }
 
     post {
         always {
-            echo 'Pipeline terminée'
-            // Nettoyage Docker
-            script {
-                sh 'docker logout || true'
-                sh 'docker system prune -f || true'
-            }
+            sh 'docker system prune -f'
         }
         success {
-            echo 'Build et déploiement Docker réussis!'
-            echo "Images disponibles: ${DOCKER_IMAGE}:${env.BUILD_ID} et ${DOCKER_IMAGE}:latest"
-        }
-        failure {
-            echo 'Build échoué!'
+            echo '✅ Build Docker réussi!'
         }
     }
 }
