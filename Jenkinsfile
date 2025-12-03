@@ -9,6 +9,8 @@ pipeline {
     environment {
         DOCKER_IMAGE = 'badrftw/student-management'
         DOCKER_REGISTRY = 'docker.io'
+        SONAR_HOST_URL = 'http://localhost:9000'
+        SONAR_TOKEN = credentials('sonar-token')
     }
 
     stages {
@@ -26,6 +28,27 @@ pipeline {
             }
         }
 
+        stage('Analyse SonarQube') {
+            steps {
+                script {
+                    // Vérifie que SonarQube est accessible
+                    sh '''
+                        echo "Vérification de la connexion à SonarQube..."
+                        curl -f ${SONAR_HOST_URL}/api/system/status || echo "SonarQube non accessible"
+                    '''
+
+                    // Exécute l'analyse SonarQube
+                    sh "mvn sonar:sonar \
+                        -Dsonar.projectKey=student-management \
+                        -Dsonar.projectName='Student Management' \
+                        -Dsonar.host.url=${SONAR_HOST_URL} \
+                        -Dsonar.login=${SONAR_TOKEN} \
+                        -Dsonar.java.source=11 \
+                        -Dsonar.sourceEncoding=UTF-8"
+                }
+            }
+        }
+
         stage('Package JAR') {
             steps {
                 sh 'mvn package -DskipTests'
@@ -35,7 +58,6 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // ✅ SUPPRIMER sudo - utiliser docker directement
                     sh "docker build -t ${DOCKER_IMAGE}:${env.BUILD_ID} ."
                     sh "docker tag ${DOCKER_IMAGE}:${env.BUILD_ID} ${DOCKER_IMAGE}:latest"
                 }
@@ -78,13 +100,13 @@ pipeline {
 
     post {
         always {
-            // ✅ SUPPRIMER sudo
             sh 'docker system prune -f || true'
             echo 'Pipeline terminée'
         }
         success {
             echo '✅ Build Docker réussi!'
             echo "Image: ${DOCKER_IMAGE}:${env.BUILD_ID}"
+            echo "Rapport SonarQube: ${SONAR_HOST_URL}/dashboard?id=student-management"
         }
         failure {
             echo '❌ Build échoué!'
