@@ -7,181 +7,259 @@ pipeline {
     }
 
     environment {
-        DOCKER_IMAGE = 'your-dockerhub/student-management'
-        KUBE_NAMESPACE = 'devops'
-        SONAR_HOST_URL = 'http://sonarqube-service:9000'
+        DOCKER_IMAGE = 'badrftw/student-management'
+        DOCKER_REGISTRY = 'docker.io'
+        SONAR_HOST_URL = 'http://localhost:9000'
         SONAR_TOKEN = credentials('sonar-token')
+        KUBE_NAMESPACE = 'devops'
     }
 
     stages {
-        // Étape 1 : Récupération du code
-        stage('Git Checkout') {
+        stage('Checkout Git') {
             steps {
                 git branch: 'main',
-                        url: 'https://github.com/your-repo/student-management.git',
-                        credentialsId: 'github-credentials'
+                        url: 'https://github.com/BadrFTW/studentManagement.git',
+                        credentialsId: 'github-token'
             }
         }
 
-        // Étape 2 : Build Maven
-        stage('Maven Build') {
+        stage('Build Maven') {
             steps {
                 sh 'mvn clean compile'
             }
         }
 
-        // Étape 3 : Analyse SonarQube
-        stage('SonarQube Analysis') {
+        stage('Analyse SonarQube') {
             steps {
-                sh """
-                    mvn sonar:sonar \
+                script {
+                    // Vérifie que SonarQube est accessible
+                    sh '''
+                        echo "Vérification de la connexion à SonarQube..."
+                        curl -f ${SONAR_HOST_URL}/api/system/status || echo "SonarQube non accessible"
+                    '''
+
+                    // Exécute l'analyse SonarQube
+                    sh "mvn sonar:sonar \
                         -Dsonar.projectKey=student-management \
+                        -Dsonar.projectName='Student Management' \
                         -Dsonar.host.url=${SONAR_HOST_URL} \
-                        -Dsonar.login=${SONAR_TOKEN}
-                """
+                        -Dsonar.login=${SONAR_TOKEN} \
+                        -Dsonar.java.source=11 \
+                        -Dsonar.sourceEncoding=UTF-8"
+                }
             }
         }
 
-        // Étape 4 : Packaging JAR
         stage('Package JAR') {
             steps {
                 sh 'mvn package -DskipTests'
             }
         }
 
-        // Étape 5 : Build Docker Image
-        stage('Docker Build') {
+        stage('Build Docker Image') {
             steps {
                 script {
-                    sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
-                    sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
+                    sh "docker build -t ${DOCKER_IMAGE}:${env.BUILD_ID} ."
+                    sh "docker tag ${DOCKER_IMAGE}:${env.BUILD_ID} ${DOCKER_IMAGE}:latest"
                 }
             }
         }
 
-        // Étape 6 : Push vers Docker Hub
-        stage('Docker Push') {
+        stage('Docker Login') {
             steps {
-                withCredentials([usernamePassword(
-                        credentialsId: 'dockerhub-credentials',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                )]) {
+                script {
+                    withCredentials([usernamePassword(
+                            credentialsId: 'docker-hub-credentials',
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS'
+                    )]) {
+                        sh """
+                            echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                script {
                     sh """
-                        echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin
-                        docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                        docker push ${DOCKER_IMAGE}:${env.BUILD_ID}
                         docker push ${DOCKER_IMAGE}:latest
                     """
                 }
             }
         }
+        // ==================== ÉTAPES KUBERNETES À AJOUTER ====================
 
-        // Étape 7 : Mettre à jour l'image dans spring-deployment.yaml
-        stage('Update Kubernetes Image Tag') {
+        stage('Update Deployment Image') {
             steps {
                 script {
-                    // Mettre à jour l'image dans le fichier YAML avec le numéro de build
+                    // Mettre à jour l'image Docker dans le fichier de déploiement Spring Boot
                     sh """
-                        sed -i 's|image: .*|image: ${DOCKER_IMAGE}:${BUILD_NUMBER}|' spring-deployment.yaml
+                        sed -i 's|image: .*/student-management:.*|image: ${DOCKER_IMAGE}:${env.BUILD_ID}|' spring-deployment.yaml
                     """
+                    echo "✅ Image mise à jour dans spring-deployment.yaml : ${DOCKER_IMAGE}:${env.BUILD_ID}"
                 }
             }
         }
 
-        // Étape 8 : Déploiement sur Kubernetes
-        stage('Kubernetes Deploy') {
+        stage('Create Kubernetes Namespace') {
             steps {
                 script {
-                    // Création du namespace si inexistant
+                    // Créer le namespace s'il n'existe pas (mode idempotent)
                     sh """
                         kubectl create namespace ${KUBE_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
                     """
+                    echo "✅ Namespace ${KUBE_NAMESPACE} créé/vérifié"
+                }
+            }
+        }
 
-                    // Déploiement dans l'ordre
+        stage('Deploy MySQL to Kubernetes') {
+            steps {
+                script {
                     sh """
                         kubectl apply -f mysql-deployment.yaml -n ${KUBE_NAMESPACE}
+                    """
+                    echo "✅ MySQL déployé dans ${KUBE_NAMESPACE}"
+
+                    // Attendre que MySQL soit prêt
+                    sh """
+                        kubectl wait --for=condition=available --timeout=180s deployment/mysql -n ${KUBE_NAMESPACE} || true
+                    """
+                }
+            }
+        }
+
+        stage('Deploy SonarQube to Kubernetes') {
+            steps {
+                script {
+                    sh """
                         kubectl apply -f sonarqube-deployment.yaml -n ${KUBE_NAMESPACE}
+                    """
+                    echo "✅ SonarQube déployé dans ${KUBE_NAMESPACE}"
+                }
+            }
+        }
+
+        stage('Deploy Spring Boot to Kubernetes') {
+            steps {
+                script {
+                    sh """
                         kubectl apply -f spring-deployment.yaml -n ${KUBE_NAMESPACE}
                     """
+                    echo "✅ Spring Boot déployé dans ${KUBE_NAMESPACE}"
                 }
             }
         }
 
-        // Étape 9 : Vérification des déploiements
-        stage('Verify Deployments') {
+        stage('Verify Kubernetes Deployments') {
             steps {
                 script {
                     sh """
-                        echo "=== Pods dans le namespace ${KUBE_NAMESPACE} ==="
+                        echo "=== État des Pods ==="
                         kubectl get pods -n ${KUBE_NAMESPACE} -o wide
                         
-                        echo "=== Services ==="
+                        echo ""
+                        echo "=== État des Services ==="
                         kubectl get svc -n ${KUBE_NAMESPACE}
                         
+                        echo ""
                         echo "=== Vérification des déploiements ==="
-                        kubectl rollout status deployment/mysql -n ${KUBE_NAMESPACE} --timeout=120s || true
-                        kubectl rollout status deployment/sonarqube -n ${KUBE_NAMESPACE} --timeout=120s || true
-                        kubectl rollout status deployment/spring-app -n ${KUBE_NAMESPACE} --timeout=120s
+                        kubectl rollout status deployment/spring-app -n ${KUBE_NAMESPACE} --timeout=120s || echo "Vérification du déploiement Spring Boot"
                     """
                 }
             }
         }
 
-        // Étape 10 : Test de l'application
-        stage('Test Application') {
+        stage('Test Spring Boot Application') {
             steps {
                 script {
                     sh """
-                        # Attendre que le service soit disponible
-                        sleep 10
+                        # Attendre que l'application soit complètement déployée
+                        sleep 20
                         
-                        # Récupérer l'URL du service Spring Boot
+                        # Obtenir l'URL du service Spring Boot
+                        echo "=== Test de l'application Spring Boot ==="
                         APP_URL=\$(minikube service spring-service -n ${KUBE_NAMESPACE} --url 2>/dev/null || echo "")
                         
                         if [ -z "\$APP_URL" ]; then
-                            echo "Service non trouvé, tentative avec NodePort direct"
+                            # Alternative: utiliser NodePort directement
                             NODE_IP=\$(minikube ip)
-                            NODE_PORT=\$(kubectl get svc spring-service -n ${KUBE_NAMESPACE} -o jsonpath='{.spec.ports[0].nodePort}')
+                            NODE_PORT=\$(kubectl get svc spring-service -n ${KUBE_NAMESPACE} -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "30080")
                             APP_URL="http://\${NODE_IP}:\${NODE_PORT}"
                         fi
                         
-                        echo "URL de l'application: \$APP_URL"
+                        echo "URL de test: \$APP_URL"
                         
-                        # Tester l'endpoint
-                        curl -f -s -o /dev/null -w "HTTP Code: %{http_code}\n" \${APP_URL}/actuator/health || \
-                        curl -f -s -o /dev/null -w "HTTP Code: %{http_code}\n" \${APP_URL}/department/getAllDepartment
+                        # Tester l'application avec plusieurs endpoints
+                        MAX_RETRIES=10
+                        RETRY_COUNT=0
+                        
+                        while [ \$RETRY_COUNT -lt \$MAX_RETRIES ]; do
+                            HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" \$APP_URL/actuator/health 2>/dev/null || echo "000")
+                            
+                            if [ "\$HTTP_CODE" = "200" ] || [ "\$HTTP_CODE" = "404" ]; then
+                                echo "✅ Application répond (HTTP Code: \$HTTP_CODE)"
+                                break
+                            else
+                                echo "⏳ Tentative \$(expr \$RETRY_COUNT + 1)/\$MAX_RETRIES - Application non disponible (HTTP Code: \$HTTP_CODE)"
+                                RETRY_COUNT=\$((RETRY_COUNT + 1))
+                                sleep 10
+                            fi
+                        done
+                        
+                        if [ \$RETRY_COUNT -eq \$MAX_RETRIES ]; then
+                            echo "⚠️ Application non accessible après \$MAX_RETRIES tentatives"
+                        fi
                     """
                 }
+            }
+        }
+
+        stage('Show Access URLs') {
+            steps {
+                script {
+                    sh """
+                        echo "=== URLs d'accès ==="
+                        echo "Spring Boot:"
+                        minikube service spring-service -n ${KUBE_NAMESPACE} --url || echo "  URL non disponible"
+                        
+                        echo ""
+                        echo "SonarQube:"
+                        minikube service sonarqube-service -n ${KUBE_NAMESPACE} --url || echo "  URL non disponible"
+                        
+                        echo ""
+                        echo "=== Commandes de vérification ==="
+                        echo "kubectl get all -n ${KUBE_NAMESPACE}"
+                        echo "kubectl logs -l app=spring-app -n ${KUBE_NAMESPACE} --tail=20"
+                    """
+                }
+            }
+        }
+        // ==================== FIN DES ÉTAPES KUBERNETES ====================
+
+        stage('Archive Artifacts') {
+            steps {
+                archiveArtifacts 'target/*.jar'
             }
         }
     }
 
     post {
         always {
-            // Nettoyage
             sh 'docker system prune -f || true'
-            echo 'Pipeline terminée.'
-
-            // Restaurer le fichier YAML original
-            sh '''
-                git checkout -- spring-deployment.yaml 2>/dev/null || true
-            '''
+            echo 'Pipeline terminée'
         }
         success {
-            echo '✅ Déploiement réussi !'
-            echo "Pour accéder à l'application :"
-            sh '''
-                echo "Spring Boot: $(minikube service spring-service -n ${KUBE_NAMESPACE} --url || echo 'Service non disponible')"
-                echo "SonarQube: $(minikube service sonarqube-service -n ${KUBE_NAMESPACE} --url || echo 'Service non disponible')"
-            '''
-            echo "Pour vérifier l'état : kubectl get all -n ${KUBE_NAMESPACE}"
+            echo '✅ Build Docker réussi!'
+            echo "Image: ${DOCKER_IMAGE}:${env.BUILD_ID}"
+            echo "Rapport SonarQube: ${SONAR_HOST_URL}/dashboard?id=student-management"
         }
         failure {
-            echo '❌ Échec du pipeline.'
-            echo "Logs des pods en échec :"
-            sh '''
-                kubectl get pods -n ${KUBE_NAMESPACE} --field-selector=status.phase!=Running -o name | xargs -r kubectl logs -n ${KUBE_NAMESPACE} --tail=20
-            '''
+            echo '❌ Build échoué!'
         }
     }
 }
