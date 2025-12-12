@@ -9,7 +9,7 @@ pipeline {
     environment {
         DOCKER_IMAGE = 'badrftw/student-management'
         DOCKER_REGISTRY = 'docker.io'
-        SONAR_HOST_URL = 'http://localhost:9000'
+        SONAR_HOST_URL = 'http://sonarqube-service:9000'
         SONAR_TOKEN = credentials('sonar-token')
         KUBE_NAMESPACE = 'devops'
     }
@@ -32,37 +32,46 @@ pipeline {
         stage('Analyse SonarQube') {
             steps {
                 script {
-                    // Vérifie que SonarQube est accessible
-                    sh '''
-                        echo "Vérification de la connexion à SonarQube..."
-                        curl -f $SONAR_HOST_URL/api/system/status || echo "SonarQube non accessible"
-                    '''
+                    echo "🔧 Configuration de l'accès à SonarQube..."
 
-                    // Exécute l'analyse SonarQube - CORRECTION ICI
-                    sh '''
-                        mvn sonar:sonar \
-                            -Dsonar.projectKey=student-management \
-                            -Dsonar.projectName='Student Management' \
-                            -Dsonar.host.url=''' + SONAR_HOST_URL + ''' \
-                            -Dsonar.login=''' + SONAR_TOKEN + ''' \
-                            -Dsonar.java.source=11 \
-                            -Dsonar.sourceEncoding=UTF-8
-                    '''
-                }
-            }
-        }
+                    // Option 1: Essayer d'accéder directement via le service
+                    def sonarUrl = "http://sonarqube-service:9000"
+                    def sonarNamespace = "devops"  // ou votre namespace
 
-        stage('Package JAR') {
-            steps {
-                sh 'mvn package -DskipTests'
-            }
-        }
+                    try {
+                        // Tester l'accès direct
+                        sh """
+                            timeout 10 kubectl exec -i -n ${sonarNamespace} \
+                                \$(kubectl get pods -n ${sonarNamespace} -l app=sonarqube -o jsonpath='{.items[0].metadata.name}') \
+                                -- curl -s http://localhost:9000/api/system/status || echo "Test direct échoué"
+                        """
+                        echo "✅ Accès direct possible"
+                    } catch (Exception e) {
+                        echo "⚠️ Accès direct impossible, configuration du port-forward..."
 
-        stage('Build Docker Image') {
-            steps {
-                script {
-                    sh "docker build -t ${DOCKER_IMAGE}:${env.BUILD_ID} ."
-                    sh "docker tag ${DOCKER_IMAGE}:${env.BUILD_ID} ${DOCKER_IMAGE}:latest"
+                        // Option 2: Configurer un port-forward
+                        sh '''
+                            # Démarrer le port-forward en arrière-plan
+                            kubectl port-forward svc/sonarqube-service -n devops 9000:9000 > /tmp/sonar-portforward.log 2>&1 &
+                            echo $! > /tmp/sonar-pid.txt
+                            sleep 15  # Attendre que le port-forward soit établi
+                        '''
+
+                        sonarUrl = "http://localhost:9000"
+                    }
+
+                    // Exécuter l'analyse avec l'URL déterminée
+                    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN_SECURE')]) {
+                        sh """
+                            mvn sonar:sonar \
+                                -Dsonar.projectKey=student-management \
+                                -Dsonar.projectName='Student Management' \
+                                -Dsonar.host.url=${sonarUrl} \
+                                -Dsonar.login=\${SONAR_TOKEN_SECURE} \
+                                -Dsonar.java.source=11 \
+                                -Dsonar.sourceEncoding=UTF-8
+                        """
+                    }
                 }
             }
         }
