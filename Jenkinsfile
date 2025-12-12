@@ -11,6 +11,8 @@ pipeline {
         DOCKER_REGISTRY = 'docker.io'
         SONAR_HOST_URL = 'http://localhost:9000'
         SONAR_TOKEN = credentials('sonar-token')
+        KUBE_NAMESPACE = "devops"
+
     }
 
     stages {
