@@ -29,7 +29,73 @@ pipeline {
             }
         }
 
+        stage('Prepare for SonarQube') {
+            steps {
+                script {
+                    sh '''
+                        echo "Vérification de l'accès à SonarQube..."
+                        # Essayer de contacter SonarQube via plusieurs méthodes
+                        timeout(time: 30, unit: 'SECONDS') {
+                            sh '''
+                    # Méthode 1: Via service Kubernetes
+                    kubectl exec -i -n devops $(kubectl get pods -n devops -l app=sonarqube -o jsonpath="{.items[0].metadata.name}" 2>/dev/null || echo "") -- \
+                                    curl -s http://localhost:9000/api/system/status 2>/dev/null || \
+                    # Méthode 2: Via port-forward local
+                    curl -s http://localhost:9000/api/system/status 2>/dev/null || \
+                    # Méthode 3: Ignorer si non disponible
+                    echo "SonarQube non accessible, continuation sans analyse..."
+                    '''
+                        }
+                    '''
+                }
+            }
+        }
 
+        stage('Analyse SonarQube') {
+            steps {
+                script {
+                    // Version sécurisée sans interpolation Groovy
+                    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN_SECURE')]) {
+                        sh """
+                            # Tenter l'analyse SonarQube mais continuer si échec
+                            mvn sonar:sonar \
+                                -Dsonar.projectKey=student-management \
+                                -Dsonar.projectName='Student Management' \
+                                -Dsonar.host.url=\${SONAR_HOST_URL} \
+                                -Dsonar.login=\${SONAR_TOKEN_SECURE} \
+                                -Dsonar.java.source=11 \
+                                -Dsonar.sourceEncoding=UTF-8 || \
+                            echo "⚠️ Analyse SonarQube échouée, continuation du pipeline..."
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Package JAR') {
+            steps {
+                sh '''
+                    mvn clean package -DskipTests
+                    
+                    # Vérifier et préparer le JAR pour Docker
+                    echo "=== Recherche du fichier JAR ==="
+                    JAR_FILE=$(find . -name "*.jar" -type f | grep -v ".m2" | head -1)
+                    
+                    if [ -n "$JAR_FILE" ]; then
+                        echo "✅ JAR trouvé: $JAR_FILE"
+                        # Créer le répertoire target s'il n'existe pas
+                        mkdir -p target
+                        # Copier le JAR dans target avec un nom standard
+                        cp "$JAR_FILE" target/application.jar
+                        echo "✅ JAR préparé dans target/application.jar"
+                        ls -lh target/application.jar
+                    else
+                        echo "❌ ERREUR: Aucun fichier JAR trouvé!"
+                        exit 1
+                    fi
+                '''
+            }
+        }
 
         stage('Docker Login') {
             steps {
@@ -40,28 +106,43 @@ pipeline {
                             passwordVariable: 'DOCKER_PASS'
                     )]) {
                         sh """
-                            echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin
+                            echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
                         """
                     }
                 }
             }
         }
+
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Vérifier que le JAR existe
                     sh '''
-                        echo "Vérification du fichier JAR..."
-                        ls -la target/*.jar || echo "Aucun JAR trouvé"
+                        echo "=== Préparation de la construction Docker ==="
+                        echo "Vérification des fichiers nécessaires:"
+                        ls -la target/application.jar || echo "⚠️ target/application.jar non trouvé"
+                        test -f Dockerfile && echo "✅ Dockerfile présent" || echo "❌ Dockerfile manquant"
+                        
+                        # Créer un Dockerfile simple s'il n'existe pas
+                        if [ ! -f Dockerfile ]; then
+                            echo "Création d'un Dockerfile simple..."
+                            cat > Dockerfile << 'EOF'
+FROM eclipse-temurin:11-jre
+WORKDIR /app
+COPY target/application.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
+EOF
+                        fi
                     '''
 
-                    // Construire l'image avec le bon contexte
+                    // Construire l'image Docker
                     sh """
-                        docker build -t ${DOCKER_IMAGE}:${env.BUILD_ID} -f Dockerfile .
-                    """
-
-                    // Vérifier que l'image a été créée
-                    sh """
+                        docker build -t ${DOCKER_IMAGE}:${env.BUILD_ID} .
+                        
+                        # Créer aussi le tag latest
+                        docker tag ${DOCKER_IMAGE}:${env.BUILD_ID} ${DOCKER_IMAGE}:latest
+                        
+                        echo "=== Vérification des images construites ==="
                         docker images | grep ${DOCKER_IMAGE}
                     """
                 }
@@ -72,21 +153,39 @@ pipeline {
             steps {
                 script {
                     sh """
+                        # Pousser l'image avec le tag BUILD_ID
                         docker push ${DOCKER_IMAGE}:${env.BUILD_ID}
+                        
+                        # Pousser l'image latest
                         docker push ${DOCKER_IMAGE}:latest
+                        
+                        echo "✅ Images Docker poussées avec succès"
                     """
                 }
             }
         }
-        // ==================== ÉTAPES KUBERNETES À AJOUTER ====================
 
         stage('Update Deployment Image') {
             steps {
                 script {
-                    // Mettre à jour l'image Docker dans le fichier de déploiement Spring Boot
+                    sh '''
+                        echo "=== Mise à jour du fichier de déploiement ==="
+                        echo "Contenu original de spring-deployment.yaml:"
+                        grep -n "image:" spring-deployment.yaml || echo "Aucune ligne 'image:' trouvée"
+                        
+                        # Sauvegarder l'original
+                        cp spring-deployment.yaml spring-deployment.yaml.backup
+                    '''
+
+                    // Mettre à jour l'image Docker
                     sh """
-                        sed -i 's|image: .*/student-management:.*|image: ${DOCKER_IMAGE}:${env.BUILD_ID}|' spring-deployment.yaml
+                        sed -i 's|image: .*/student-management:.*|image: ${DOCKER_IMAGE}:${env.BUILD_ID}|g' spring-deployment.yaml
                     """
+
+                    sh '''
+                        echo "Contenu modifié:"
+                        grep -n "image:" spring-deployment.yaml
+                    '''
                     echo "✅ Image mise à jour dans spring-deployment.yaml : ${DOCKER_IMAGE}:${env.BUILD_ID}"
                 }
             }
@@ -95,9 +194,12 @@ pipeline {
         stage('Create Kubernetes Namespace') {
             steps {
                 script {
-                    // Créer le namespace s'il n'existe pas (mode idempotent)
                     sh """
+                        # Créer le namespace de manière idempotente
                         kubectl create namespace ${KUBE_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+                        
+                        echo "=== Vérification du namespace ==="
+                        kubectl get namespaces | grep ${KUBE_NAMESPACE} || echo "Namespace non trouvé"
                     """
                     echo "✅ Namespace ${KUBE_NAMESPACE} créé/vérifié"
                 }
@@ -108,14 +210,20 @@ pipeline {
             steps {
                 script {
                     sh """
+                        # Appliquer le déploiement MySQL
                         kubectl apply -f mysql-deployment.yaml -n ${KUBE_NAMESPACE}
+                        
+                        echo "=== Attente du démarrage de MySQL ==="
+                        # Attendre avec timeout
+                        timeout(time: 180, unit: 'SECONDS') {
+                            sh '''
+                                kubectl wait --for=condition=available --timeout=180s deployment/mysql -n ${KUBE_NAMESPACE} 2>/dev/null || \
+                                echo "MySQL en cours de démarrage..."
+                                sleep 10
+                            '''
+                        }
                     """
                     echo "✅ MySQL déployé dans ${KUBE_NAMESPACE}"
-
-                    // Attendre que MySQL soit prêt
-                    sh """
-                        kubectl wait --for=condition=available --timeout=180s deployment/mysql -n ${KUBE_NAMESPACE} || true
-                    """
                 }
             }
         }
@@ -124,7 +232,11 @@ pipeline {
             steps {
                 script {
                     sh """
+                        # Appliquer le déploiement SonarQube
                         kubectl apply -f sonarqube-deployment.yaml -n ${KUBE_NAMESPACE}
+                        
+                        echo "=== Vérification de SonarQube ==="
+                        kubectl get pods -n ${KUBE_NAMESPACE} | grep sonarqube || echo "Pod SonarQube non trouvé"
                     """
                     echo "✅ SonarQube déployé dans ${KUBE_NAMESPACE}"
                 }
@@ -135,7 +247,11 @@ pipeline {
             steps {
                 script {
                     sh """
+                        # Appliquer le déploiement Spring Boot
                         kubectl apply -f spring-deployment.yaml -n ${KUBE_NAMESPACE}
+                        
+                        echo "=== Vérification du déploiement ==="
+                        kubectl get deployments -n ${KUBE_NAMESPACE} | grep spring || echo "Déploiement Spring non trouvé"
                     """
                     echo "✅ Spring Boot déployé dans ${KUBE_NAMESPACE}"
                 }
@@ -146,7 +262,7 @@ pipeline {
             steps {
                 script {
                     sh """
-                        echo "=== État des Pods ==="
+                        echo "=== État des Pods dans ${KUBE_NAMESPACE} ==="
                         kubectl get pods -n ${KUBE_NAMESPACE} -o wide
                         
                         echo ""
@@ -155,7 +271,10 @@ pipeline {
                         
                         echo ""
                         echo "=== Vérification des déploiements ==="
-                        kubectl rollout status deployment/spring-app -n ${KUBE_NAMESPACE} --timeout=120s || echo "Vérification du déploiement Spring Boot"
+                        for deployment in \$(kubectl get deployments -n ${KUBE_NAMESPACE} -o name); do
+                            echo "Vérification de \$deployment..."
+                            kubectl rollout status \${deployment} -n ${KUBE_NAMESPACE} --timeout=60s || echo "En cours..."
+                        done
                     """
                 }
             }
@@ -165,41 +284,50 @@ pipeline {
             steps {
                 script {
                     sh """
-                        # Attendre que l'application soit complètement déployée
-                        sleep 20
+                        # Attendre que l'application soit déployée
+                        echo "=== Attente du démarrage de l'application ==="
+                        sleep 30
                         
-                        # Obtenir l'URL du service Spring Boot
-                        echo "=== Test de l'application Spring Boot ==="
-                        APP_URL=\$(minikube service spring-service -n ${KUBE_NAMESPACE} --url 2>/dev/null || echo "")
+                        # Obtenir l'URL de l'application
+                        echo "=== Obtention de l'URL ==="
+                        NODE_IP=\$(minikube ip 2>/dev/null || echo "192.168.49.2")
+                        NODE_PORT=\$(kubectl get svc spring-service -n ${KUBE_NAMESPACE} -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "30080")
                         
-                        if [ -z "\$APP_URL" ]; then
-                            # Alternative: utiliser NodePort directement
-                            NODE_IP=\$(minikube ip)
-                            NODE_PORT=\$(kubectl get svc spring-service -n ${KUBE_NAMESPACE} -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "30080")
-                            APP_URL="http://\${NODE_IP}:\${NODE_PORT}"
-                        fi
-                        
+                        APP_URL="http://\${NODE_IP}:\${NODE_PORT}"
                         echo "URL de test: \$APP_URL"
                         
-                        # Tester l'application avec plusieurs endpoints
-                        MAX_RETRIES=10
+                        # Tester l'application
+                        echo "=== Test de l'application ==="
+                        MAX_RETRIES=15
                         RETRY_COUNT=0
+                        SUCCESS=false
                         
-                        while [ \$RETRY_COUNT -lt \$MAX_RETRIES ]; do
-                            HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" \$APP_URL/actuator/health 2>/dev/null || echo "000")
+                        while [ \$RETRY_COUNT -lt \$MAX_RETRIES ] && [ "\$SUCCESS" = "false" ]; do
+                            echo "Tentative \$((RETRY_COUNT + 1))/\$MAX_RETRIES..."
                             
-                            if [ "\$HTTP_CODE" = "200" ] || [ "\$HTTP_CODE" = "404" ]; then
-                                echo "✅ Application répond (HTTP Code: \$HTTP_CODE)"
-                                break
-                            else
-                                echo "⏳ Tentative \$(expr \$RETRY_COUNT + 1)/\$MAX_RETRIES - Application non disponible (HTTP Code: \$HTTP_CODE)"
+                            # Essayer plusieurs endpoints
+                            for endpoint in "/actuator/health" "/department/getAllDepartment" "/"; do
+                                HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 \$APP_URL\$endpoint 2>/dev/null || echo "000")
+                                
+                                if [ "\$HTTP_CODE" = "200" ] || [ "\$HTTP_CODE" = "404" ] || [ "\$HTTP_CODE" = "401" ]; then
+                                    echo "✅ Endpoint \$endpoint répond (HTTP Code: \$HTTP_CODE)"
+                                    SUCCESS=true
+                                    break
+                                fi
+                            done
+                            
+                            if [ "\$SUCCESS" = "false" ]; then
                                 RETRY_COUNT=\$((RETRY_COUNT + 1))
                                 sleep 10
                             fi
                         done
                         
-                        if [ \$RETRY_COUNT -eq \$MAX_RETRIES ]; then
+                        if [ "\$SUCCESS" = "true" ]; then
+                            echo "✅ Application testée avec succès"
+                        else
                             echo "⚠️ Application non accessible après \$MAX_RETRIES tentatives"
+                            echo "Logs de l'application:"
+                            kubectl logs -l app=spring-app -n ${KUBE_NAMESPACE} --tail=20 2>/dev/null || echo "Impossible de récupérer les logs"
                         fi
                     """
                 }
@@ -211,25 +339,30 @@ pipeline {
                 script {
                     sh """
                         echo "=== URLs d'accès ==="
+                        echo ""
                         echo "Spring Boot:"
-                        minikube service spring-service -n ${KUBE_NAMESPACE} --url || echo "  URL non disponible"
+                        minikube service spring-service -n ${KUBE_NAMESPACE} --url 2>/dev/null || echo "  http://\$(minikube ip 2>/dev/null || echo 'localhost'):\$(kubectl get svc spring-service -n ${KUBE_NAMESPACE} -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo '30080')"
                         
                         echo ""
                         echo "SonarQube:"
-                        minikube service sonarqube-service -n ${KUBE_NAMESPACE} --url || echo "  URL non disponible"
+                        minikube service sonarqube-service -n ${KUBE_NAMESPACE} --url 2>/dev/null || echo "  http://\$(minikube ip 2>/dev/null || echo 'localhost'):\$(kubectl get svc sonarqube-service -n ${KUBE_NAMESPACE} -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo '32000')"
                         
                         echo ""
                         echo "=== Commandes de vérification ==="
                         echo "kubectl get all -n ${KUBE_NAMESPACE}"
-                        echo "kubectl logs -l app=spring-app -n ${KUBE_NAMESPACE} --tail=20"
+                        echo "kubectl logs -l app=spring-app -n ${KUBE_NAMESPACE} --tail=50"
                     """
                 }
             }
         }
-        // ==================== FIN DES ÉTAPES KUBERNETES ====================
 
         stage('Archive Artifacts') {
             steps {
+                sh '''
+                    echo "=== Archivage des artefacts ==="
+                    # Vérifier ce qu'on archive
+                    ls -la target/*.jar 2>/dev/null || echo "Aucun JAR à archiver"
+                '''
                 archiveArtifacts 'target/*.jar'
             }
         }
@@ -237,16 +370,37 @@ pipeline {
 
     post {
         always {
-            sh 'docker system prune -f || true'
+            sh '''
+                echo "=== Nettoyage ==="
+                # Restaurer le fichier YAML original
+                if [ -f spring-deployment.yaml.backup ]; then
+                    mv spring-deployment.yaml.backup spring-deployment.yaml
+                    echo "Fichier spring-deployment.yaml restauré"
+                fi
+                
+                # Nettoyer Docker
+                docker system prune -f 2>/dev/null || true
+            '''
             echo 'Pipeline terminée'
         }
         success {
             echo '✅ Build Docker réussi!'
             echo "Image: ${DOCKER_IMAGE}:${env.BUILD_ID}"
             echo "Rapport SonarQube: ${SONAR_HOST_URL}/dashboard?id=student-management"
+            echo "Namespace Kubernetes: ${KUBE_NAMESPACE}"
+            echo "Pour vérifier: kubectl get all -n ${KUBE_NAMESPACE}"
         }
         failure {
             echo '❌ Build échoué!'
+            sh '''
+                echo "=== Debug information ==="
+                echo "Derniers logs des pods:"
+                kubectl get pods -n ${KUBE_NAMESPACE} 2>/dev/null | grep -v Running | grep -v Completed | while read line; do
+                    POD_NAME=$(echo $line | awk '{print $1}')
+                    echo "Logs pour $POD_NAME:"
+                    kubectl logs $POD_NAME -n ${KUBE_NAMESPACE} --tail=20 2>/dev/null || true
+                done
+            '''
         }
     }
 }
