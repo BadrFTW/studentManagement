@@ -46,6 +46,27 @@ pipeline {
                 }
             }
         }
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    // Vérifier que le JAR existe
+                    sh '''
+                        echo "Vérification du fichier JAR..."
+                        ls -la target/*.jar || echo "Aucun JAR trouvé"
+                    '''
+
+                    // Construire l'image avec le bon contexte
+                    sh """
+                        docker build -t ${DOCKER_IMAGE}:${env.BUILD_ID} -f Dockerfile .
+                    """
+
+                    // Vérifier que l'image a été créée
+                    sh """
+                        docker images | grep ${DOCKER_IMAGE}
+                    """
+                }
+            }
+        }
 
         stage('Push Docker Image') {
             steps {
