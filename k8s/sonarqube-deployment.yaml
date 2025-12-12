@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sonarqube
+  namespace: devops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sonarqube
+  template:
+    metadata:
+      labels:
+        app: sonarqube
+    spec:
+      containers:
+        - name: sonarqube
+          image: sonarqube:lts
+          ports:
+            - containerPort: 9000
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1000m"
+            limits:
+              memory: "4Gi"
+              cpu: "2"
+          readinessProbe:
+            httpGet:
+              path: /about
+              port: 9000
+            initialDelaySeconds: 60   # temps d’attente avant le check
+            periodSeconds: 15         # fréquence de vérification
+          volumeMounts:
+            - name: sonarqube-data
+              mountPath: /opt/sonarqube/data
+      volumes:
+        - name: sonarqube-data
+          emptyDir: {}   # ⚠️ à remplacer par un PVC si tu veux de la persistance
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonarqube-service
+  namespace: devops
+spec:
+  selector:
+    app: sonarqube
+  ports:
+    - protocol: TCP
+      port: 9000
+      targetPort: 9000
+      nodePort: 32000
+  type: NodePort

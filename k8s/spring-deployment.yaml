@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: studentmang-app
+  namespace: devops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: studentmang-app
+  template:
+    metadata:
+      labels:
+        app: studentmang-app
+    spec:
+      containers:
+        - name: studentmang-app
+          image: badrftw/student-management:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:mysql://localhost:3306/studentdb?createDatabaseIfNotExist=true
+            - name: SPRING_DATASOURCE_USERNAME
+              value: root
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: mysql-root-password
+            - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
+              value: com.mysql.cj.jdbc.Driver
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spring-service
+  namespace: devops
+spec:
+  selector:
+    app: studentmang-app
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+      nodePort: 32639
+  type: NodePort
