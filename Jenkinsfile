@@ -29,52 +29,7 @@ pipeline {
             }
         }
 
-        stage('Analyse SonarQube') {
-            steps {
-                script {
-                    echo "🔧 Configuration de l'accès à SonarQube..."
 
-                    // Option 1: Essayer d'accéder directement via le service
-                    def sonarUrl = "http://sonarqube-service:9000"
-                    def sonarNamespace = "devops"  // ou votre namespace
-
-                    try {
-                        // Tester l'accès direct
-                        sh """
-                            timeout 10 kubectl exec -i -n ${sonarNamespace} \
-                                \$(kubectl get pods -n ${sonarNamespace} -l app=sonarqube -o jsonpath='{.items[0].metadata.name}') \
-                                -- curl -s http://localhost:9000/api/system/status || echo "Test direct échoué"
-                        """
-                        echo "✅ Accès direct possible"
-                    } catch (Exception e) {
-                        echo "⚠️ Accès direct impossible, configuration du port-forward..."
-
-                        // Option 2: Configurer un port-forward
-                        sh '''
-                            # Démarrer le port-forward en arrière-plan
-                            kubectl port-forward svc/sonarqube-service -n devops 9000:9000 > /tmp/sonar-portforward.log 2>&1 &
-                            echo $! > /tmp/sonar-pid.txt
-                            sleep 15  # Attendre que le port-forward soit établi
-                        '''
-
-                        sonarUrl = "http://localhost:9000"
-                    }
-
-                    // Exécuter l'analyse avec l'URL déterminée
-                    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN_SECURE')]) {
-                        sh """
-                            mvn sonar:sonar \
-                                -Dsonar.projectKey=student-management \
-                                -Dsonar.projectName='Student Management' \
-                                -Dsonar.host.url=${sonarUrl} \
-                                -Dsonar.login=\${SONAR_TOKEN_SECURE} \
-                                -Dsonar.java.source=11 \
-                                -Dsonar.sourceEncoding=UTF-8
-                        """
-                    }
-                }
-            }
-        }
 
         stage('Docker Login') {
             steps {
