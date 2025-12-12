@@ -72,11 +72,42 @@ pipeline {
             }
         }
 
+        stage('Déployer MySQL sur Kubernetes') {
+            steps {
+                sh """
+                
+                 kubectl apply -f k8s/mysql-deployment.yaml -n ${KUBE_NAMESPACE}
+        
+                """
+            }
+        }
+        stage('Déployer Spring Boot sur Kubernetes') {
+            steps {
+                sh """
+                sed -i 's|<dockerhub-user>/spring-app:1.0|${DOCKER_IMAGE}|g' kubernetes/spring-deployment.yaml
+              
+                kubectl apply -f k8s/spring-deployment.yaml -n ${KUBE_NAMESPACE}
+                
+                """
+            }
+        }
+        stage('Déployer sonar sur Kubernetes') {
+            steps {
+                sh """
+                
+                 kubectl apply -f k8s/sonarqube-deployment.yaml -n ${KUBE_NAMESPACE}
+        
+                """
+            }
+        }
+
+
         stage('Archive Artifacts') {
             steps {
                 archiveArtifacts 'target/*.jar'
             }
         }
+
     }
 
     post {
