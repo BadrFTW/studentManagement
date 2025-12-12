@@ -35,17 +35,19 @@ pipeline {
                     // Vérifie que SonarQube est accessible
                     sh '''
                         echo "Vérification de la connexion à SonarQube..."
-                        curl -f ${SONAR_HOST_URL}/api/system/status || echo "SonarQube non accessible"
+                        curl -f $SONAR_HOST_URL/api/system/status || echo "SonarQube non accessible"
                     '''
 
-                    // Exécute l'analyse SonarQube
-                    sh "mvn sonar:sonar \
-                        -Dsonar.projectKey=student-management \
-                        -Dsonar.projectName='Student Management' \
-                        -Dsonar.host.url=${SONAR_HOST_URL} \
-                        -Dsonar.login=${SONAR_TOKEN} \
-                        -Dsonar.java.source=11 \
-                        -Dsonar.sourceEncoding=UTF-8"
+                    // Exécute l'analyse SonarQube - CORRECTION ICI
+                    sh '''
+                        mvn sonar:sonar \
+                            -Dsonar.projectKey=student-management \
+                            -Dsonar.projectName='Student Management' \
+                            -Dsonar.host.url=''' + SONAR_HOST_URL + ''' \
+                            -Dsonar.login=''' + SONAR_TOKEN + ''' \
+                            -Dsonar.java.source=11 \
+                            -Dsonar.sourceEncoding=UTF-8
+                    '''
                 }
             }
         }
