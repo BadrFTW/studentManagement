@@ -34,18 +34,10 @@ pipeline {
         }
 
         // NOUVEAU STAGE SONARQUBE AJOUTÉ ICI
-        stage('SonarQube Analysis') {
+        stage('Scan') {
             steps {
-                script {
-                    withSonarQubeEnv('SonarQube') {
-                        sh """
-                            mvn sonar:sonar \
-                                -Dsonar.projectKey=student-management \
-                                -Dsonar.host.url=${SONAR_HOST_URL} \
-                                -Dsonar.login=${SONAR_TOKEN} \
-                                -Dsonar.java.binaries=target/classes
-                        """
-                    }
+                withSonarQubeEnv(installationName: 'sql') {
+                    sh 'mvn clean org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.0.2155:sonar'
                 }
             }
         }
