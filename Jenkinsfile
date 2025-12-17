@@ -1,6 +1,5 @@
 pipeline {
     agent any
-
     tools {
         maven 'M2_HOME'
         jdk 'JAVA_HOME'
@@ -11,8 +10,6 @@ pipeline {
         DOCKER_REGISTRY = 'docker.io'
         SONAR_HOST_URL = 'http://localhost:9000'
         SONAR_TOKEN = credentials('sonar-token')
-        KUBE_NAMESPACE = "devops"
-
     }
 
     stages {
@@ -30,11 +27,26 @@ pipeline {
             }
         }
 
-
-
         stage('Package JAR') {
             steps {
                 sh 'mvn package -DskipTests'
+            }
+        }
+
+        // NOUVEAU STAGE SONARQUBE AJOUTÉ ICI
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    withSonarQubeEnv('SonarQube') {
+                        sh """
+                            mvn sonar:sonar \
+                                -Dsonar.projectKey=student-management \
+                                -Dsonar.host.url=${SONAR_HOST_URL} \
+                                -Dsonar.login=${SONAR_TOKEN} \
+                                -Dsonar.java.binaries=target/classes
+                        """
+                    }
+                }
             }
         }
 
@@ -74,42 +86,11 @@ pipeline {
             }
         }
 
-        stage('Déployer MySQL sur Kubernetes') {
-            steps {
-                sh """
-                
-                 kubectl apply -f k8s/mysql-deployment.yaml -n ${KUBE_NAMESPACE}
-        
-                """
-            }
-        }
-        stage('Déployer Spring Boot sur Kubernetes') {
-            steps {
-                sh """
-                sed -i 's|<dockerhub-user>/spring-app:1.0|${DOCKER_IMAGE}|g' kubernetes/spring-deployment.yaml
-              
-                kubectl apply -f k8s/spring-deployment.yaml -n ${KUBE_NAMESPACE}
-                
-                """
-            }
-        }
-        stage('Déployer sonar sur Kubernetes') {
-            steps {
-                sh """
-                
-                 kubectl apply -f k8s/sonarqube-deployment.yaml -n ${KUBE_NAMESPACE}
-        
-                """
-            }
-        }
-
-
         stage('Archive Artifacts') {
             steps {
                 archiveArtifacts 'target/*.jar'
             }
         }
-
     }
 
     post {
