@@ -27,19 +27,22 @@ pipeline {
             }
         }
 
-        // MODIFICATION ICI : Ajout de la compilation et paramètres SonarQube
         stage('SonarQube Analysis') {
             steps {
                 script {
                     withSonarQubeEnv('SonarQube') {
-                        sh """
-                            mvn sonar:sonar \
-                                -Dsonar.java.binaries=target/classes \
-                                -Dsonar.java.libraries='**/*.jar' \
-                                -Dsonar.sources=src/main/java \
-                                -Dsonar.host.url=${SONAR_HOST_URL} \
-                                -Dsonar.login=${SONAR_TOKEN}
-                        """
+                        // 1. First, compile the project to ensure classes exist
+                        sh 'mvn compile'
+
+                        // 2. Execute Sonar analysis with secure parameter passing
+                        withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN_SECURE')]) {
+                            sh '''
+                        mvn sonar:sonar \
+                            -Dsonar.java.binaries=target/classes \
+                            -Dsonar.host.url=${SONAR_HOST_URL} \
+                            -Dsonar.token=${SONAR_TOKEN_SECURE}
+                    '''
+                        }
                     }
                 }
             }
