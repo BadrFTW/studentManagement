@@ -26,12 +26,21 @@ pipeline {
                 sh 'mvn clean compile'
             }
         }
-        // NOUVEAU STAGE SONARQUBE AJOUTÉ ICI
 
+        // MODIFICATION ICI : Ajout de la compilation et paramètres SonarQube
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('SonarQube') {
-                    sh 'mvn clean org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.0.2155:sonar'
+                script {
+                    withSonarQubeEnv('SonarQube') {
+                        sh """
+                            mvn sonar:sonar \
+                                -Dsonar.java.binaries=target/classes \
+                                -Dsonar.java.libraries='**/*.jar' \
+                                -Dsonar.sources=src/main/java \
+                                -Dsonar.host.url=${SONAR_HOST_URL} \
+                                -Dsonar.login=${SONAR_TOKEN}
+                        """
+                    }
                 }
             }
         }
@@ -41,8 +50,6 @@ pipeline {
                 sh 'mvn package -DskipTests'
             }
         }
-
-
 
         stage('Build Docker Image') {
             steps {
