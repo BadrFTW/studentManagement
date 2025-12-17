@@ -9,7 +9,7 @@ pipeline {
         DOCKER_IMAGE = 'badrftw/student-management'
         DOCKER_REGISTRY = 'docker.io'
         SONAR_HOST_URL = 'http://localhost:9000'
-        SONAR_TOKEN = credentials('sonar-token')
+        SONAR_TOKEN = credentials('sonarqube-token')
     }
 
     stages {
@@ -34,10 +34,18 @@ pipeline {
         }
 
         // NOUVEAU STAGE SONARQUBE AJOUTÉ ICI
-        stage('Scan') {
+        stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv(installationName: 'sql') {
-                    sh 'mvn clean org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.0.2155:sonar'
+                script {
+                    withSonarQubeEnv('SonarQube') {
+                        sh """
+                            mvn sonar:sonar \
+                                -Dsonar.projectKey=student-management \
+                                -Dsonar.host.url=${SONAR_HOST_URL} \
+                                -Dsonar.login=${SONAR_TOKEN} \
+                                -Dsonar.java.binaries=target/classes
+                        """
+                    }
                 }
             }
         }
