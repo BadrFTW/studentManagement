@@ -26,13 +26,6 @@ pipeline {
                 sh 'mvn clean compile'
             }
         }
-
-        stage('Package JAR') {
-            steps {
-                sh 'mvn package -DskipTests'
-            }
-        }
-
         // NOUVEAU STAGE SONARQUBE AJOUTÉ ICI
 
         stage('SonarQube Analysis') {
@@ -42,6 +35,14 @@ pipeline {
                 }
             }
         }
+
+        stage('Package JAR') {
+            steps {
+                sh 'mvn package -DskipTests'
+            }
+        }
+
+
 
         stage('Build Docker Image') {
             steps {
