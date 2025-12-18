@@ -186,7 +186,7 @@ pipeline {
                                 // Vérifier l'état du pod
                                 def podStatus = sh(
                                         script: """
-                                kubectl get pods -l app=studentmang -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo 'Pending'
+                                kubectl get pods -l app=studentmang-app -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo 'Pending'
                             """,
                                         returnStdout: true
                                 ).trim()
@@ -195,7 +195,7 @@ pipeline {
                                     // Vérifier si le pod est vraiment prêt (readiness probe)
                                     def readyStatus = sh(
                                             script: """
-                                    kubectl get pods -l app=studentmang -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null || echo 'false'
+                                    kubectl get pods -l app=studentmang-app -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null || echo 'false'
                                 """,
                                             returnStdout: true
                                     ).trim()
@@ -208,7 +208,7 @@ pipeline {
 
                                         // Afficher les logs de démarrage
                                         sh """
-                                    kubectl logs -l app=studentmang -n ${KUBE_NAMESPACE} --tail=5 --timestamps 2>/dev/null | grep -i "started\\|ready\\|running" || true
+                                    kubectl logs -l app=studentmang-app -n ${KUBE_NAMESPACE} --tail=5 --timestamps 2>/dev/null | grep -i "started\\|ready\\|running" || true
                                 """
                                         sleep 15
                                         return false
