@@ -89,6 +89,8 @@ pipeline {
             }
         }
 
+
+
         // ========== STAGES KUBERNETES AVEC FICHIERS YAML ==========
 
         stage('Create Kubernetes Namespace') {
@@ -97,209 +99,84 @@ pipeline {
                     // Créer le namespace devops s'il n'existe pas
                     sh """
                     cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: ${KUBE_NAMESPACE}
-EOF
+                    apiVersion: v1
+                    kind: Namespace
+                    metadata:
+                    name: ${KUBE_NAMESPACE}
+                    EOF
                     """
                 }
             }
         }
 
-        stage('Deploy MySQL from YAML') {
+
+        stage('Deploy MySQL') {
             steps {
                 script {
-                    // Appliquer le fichier MySQL YAML depuis votre dossier k8s
+                    echo "Déploiement de MySQL..."
+
+                    // Appliquer le YAML
                     sh "kubectl apply -f ${K8S_DIR}/mysql-deployment.yaml -n ${KUBE_NAMESPACE}"
 
                     // Attendre que MySQL soit prêt
                     sh """
-                    kubectl wait --for=condition=ready pod -l app=mysql -n ${KUBE_NAMESPACE} --timeout=120s || echo "MySQL prend plus de temps à démarrer"
-                    """
-                }
-            }
-        }
-
-        stage('Update Spring Boot Deployment YAML') {
-            steps {
-                script {
-                    // Si vous avez un fichier YAML séparé pour Spring Boot, mettez à jour l'image
-                    sh """
-                    # Mettre à jour l'image dans le fichier YAML s'il existe
-                    if [ -f "${K8S_DIR}/spring-deployment.yaml" ]; then
-                        sed -i "s|image: .*|image: ${DOCKER_IMAGE}:${env.BUILD_ID}|g" ${K8S_DIR}/spring-deployment.yaml
-                        echo "Fichier YAML Spring Boot mis à jour avec l'image: ${DOCKER_IMAGE}:${env.BUILD_ID}"
-                    fi
-                    """
-                }
-            }
-        }
-
-        stage('Deploy Spring Boot Application') {
-            steps {
-                script {
-                    // Déployer Spring Boot depuis vos fichiers YAML
-                    sh """
-                    # Appliquer tous les fichiers YAML pour Spring Boot dans le dossier k8s
-                    # (exclure mysql-deployment.yaml s'il existe déjà)
-                    for file in ${K8S_DIR}/*.yaml; do
-                        if [ "\${file}" != "${K8S_DIR}/mysql-deployment.yaml" ]; then
-                            kubectl apply -f "\${file}" -n ${KUBE_NAMESPACE} || echo "Fichier \${file} non appliqué"
-                        fi
-                    done
-                    """
-
-                    // OU si vous avez un fichier spécifique pour Spring Boot
-                    sh """
-                    if [ -f "${K8S_DIR}/spring-deployment.yaml" ]; then
-                        kubectl apply -f ${K8S_DIR}/spring-deployment.yaml -n ${KUBE_NAMESPACE}
-                    else
-                        # Fallback: créer un déploiement basique si le fichier n'existe pas
-                        cat <<EOF | kubectl apply -n ${KUBE_NAMESPACE} -f -
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: studentmang-app
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: spring-app
-  template:
-    metadata:
-      labels:
-        app: spring-app
-    spec:
-      containers:
-      - name: spring-app
-        image: ${DOCKER_IMAGE}:${env.BUILD_ID}
-        ports:
-        - containerPort: 8080
-        env:
-        - name: SPRING_DATASOURCE_URL
-          value: jdbc:mysql://mysql-service:3306/testdb
-        - name: SPRING_DATASOURCE_USERNAME
-          value: root
-        - name: SPRING_DATASOURCE_PASSWORD
-          value: root
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: spring-service
-spec:
-  selector:
-    app: spring-app
-  ports:
-  - port: 8080
-    targetPort: 8080
-    nodePort: 30080
-  type: NodePort
-EOF
-                    fi
-                    """
-                }
-            }
-        }
-
-        stage('Wait for Application Readiness') {
-            steps {
-                script {
-                    sh """
-            # Attendre que le pod passe de ContainerCreating à Running
-            echo "⏳ Attente du démarrage du container..."
-            
-            for i in {1..60}; do
-                POD_STATUS=\$(kubectl get pod studentmang-app-6648c5b4c4-k8cmp -n ${KUBE_NAMESPACE} -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
-                
-                if [ "\$POD_STATUS" = "Running" ]; then
-                    echo "✅ Pod en cours d'exécution"
-                    break
-                elif [ "\$POD_STATUS" = "ContainerCreating" ] || [ "\$POD_STATUS" = "Pending" ]; then
-                    echo "⏳ État: \$POD_STATUS - Attente (\$i/60)..."
-                    sleep 5
-                elif [ "\$POD_STATUS" = "NotFound" ]; then
-                    echo "❌ Pod non trouvé"
-                    break
-                else
-                    echo "⚠️ État inattendu: \$POD_STATUS"
-                    kubectl describe pod studentmang-app-6648c5b4c4-k8cmp -n ${KUBE_NAMESPACE} | tail -20
-                    break
-                fi
-            done
-            
-            # Vérifier l'état final
-            POD_STATUS=\$(kubectl get pod studentmang-app-6648c5b4c4-k8cmp -n ${KUBE_NAMESPACE} -o jsonpath='{.status.phase}')
-            CONTAINER_STATUS=\$(kubectl get pod studentmang-app-6648c5b4c4-k8cmp -n ${KUBE_NAMESPACE} -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}')
-            
-            if [ "\$POD_STATUS" = "Running" ]; then
-                echo "✅ Affichage des logs..."
-                kubectl logs studentmang-app-6648c5b4c4-k8cmp -n ${KUBE_NAMESPACE} --tail=50
-            else
-                echo "❌ Pod non prêt. État: \$POD_STATUS"
-                echo "Raison d'attente: \$CONTAINER_STATUS"
-                
-                # Debug avancé
-                echo "=== Debug complet ==="
-                kubectl describe pod studentmang-app-6648c5b4c4-k8cmp -n ${KUBE_NAMESPACE}
-                
-                # Vérifier les événements
-                echo "=== Événements récents ==="
-                kubectl get events -n ${KUBE_NAMESPACE} --field-selector involvedObject.name=studentmang-app-6648c5b4c4-k8cmp
-                
-                exit 1
-            fi
+            kubectl wait --for=condition=ready pod -l app=mysql -n ${KUBE_NAMESPACE} --timeout=180s
             """
+
+                    echo "✅ MySQL déployé avec succès"
                 }
             }
         }
 
-        stage('Verify Deployment') {
+        stage('Deploy SonarQube') {
             steps {
                 script {
-                    // Vérifications complètes
+                    echo "Déploiement de SonarQube..."
+
+                    // Vérifier rapidement que MySQL est prêt
                     sh """
-                    echo "=== État des Pods ==="
-                    kubectl get pods -n ${KUBE_NAMESPACE}
-                    
-                    echo "\\n=== État des Services ==="
-                    kubectl get svc -n ${KUBE_NAMESPACE}
-                    
-                    echo "\\n=== État des Déploiements ==="
-                    kubectl get deployments -n ${KUBE_NAMESPACE}
-                    
-                    echo "\\n=== URL d'accès à l'application ==="
-                    minikube service spring-service -n ${KUBE_NAMESPACE} --url || echo "Service NodePort disponible sur le port 30080"
-                    
-                    echo "\\n=== IP de Minikube ==="
-                    minikube ip || true
-                    """
+            kubectl get pods -l app=mysql -n ${KUBE_NAMESPACE} | grep Running || echo "⚠️ Vérifiez l'état de MySQL"
+            """
+
+                    // Appliquer le YAML
+                    sh "kubectl apply -f ${K8S_DIR}/sonarqube-deployment.yaml -n ${KUBE_NAMESPACE}"
+
+                    // Attendre que SonarQube soit prêt
+                    sh """
+            kubectl wait --for=condition=ready pod -l app=sonarqube -n ${KUBE_NAMESPACE} --timeout=240s
+            """
+
+                    echo "✅ SonarQube déployé avec succès"
                 }
             }
         }
 
-        stage('Smoke Test') {
+        stage('Deploy Spring Application') {
             steps {
                 script {
-                    // Test simple pour vérifier que l'application répond
+                    echo "Déploiement de l'application Spring..."
+
+                    // Appliquer le YAML
+                    sh "kubectl apply -f ${K8S_DIR}/spring-deployment.yaml -n ${KUBE_NAMESPACE}"
+
+                    // Attendre que Spring soit prêt avec timeout plus long
                     sh """
-                    # Attendre un peu plus pour être sûr
-                    sleep 10
-                    
-                    # Obtenir l'URL du service
-                    APP_URL=\$(minikube service spring-service -n ${KUBE_NAMESPACE} --url 2>/dev/null || echo "http://\$(minikube ip):30080")
-                    
-                    echo "Testing application at: \$APP_URL"
-                    
-                    # Tester l'endpoint de santé ou un endpoint API
-                    curl -f --max-time 30 \$APP_URL/actuator/health || \\
-                    curl -f --max-time 30 \$APP_URL/ || \\
-                    echo "Application test skipped or endpoint not available"
-                    """
+            kubectl wait --for=condition=ready pod -l app=spring -n ${KUBE_NAMESPACE} --timeout=300s
+            """
+
+                    // Vérification rapide
+                    sh """
+            echo "📊 État des pods Spring:"
+            kubectl get pods -l app=spring -n ${KUBE_NAMESPACE}
+            """
+
+                    echo "✅ Application Spring déployée avec succès"
                 }
             }
         }
+
+
+
 
         stage('Archive Artifacts') {
             steps {
