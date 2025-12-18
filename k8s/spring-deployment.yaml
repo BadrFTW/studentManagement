@@ -13,37 +13,14 @@ spec:
       labels:
         app: studentmang-app
     spec:
-      initContainers:
-        - name: extract-jar
-          image: badrftw/student-management:latest
-          command: ["sh", "-c"]
-          args:
-            - |
-              echo "Recherche du fichier JAR..."
-              JAR_FILE=$(find / -name "*.jar" -type f 2>/dev/null | head -1)
-              if [ -z "$JAR_FILE" ]; then
-                echo "JAR non trouvé, recherche alternative..."
-                JAR_FILE=$(find /app -name "*.jar" -type f 2>/dev/null | head -1)
-              fi
-              echo "JAR trouvé: $JAR_FILE"
-              cp "$JAR_FILE" /shared/app.jar
-              echo "Fichier JAR copié"
-          volumeMounts:
-            - name: app-storage
-              mountPath: /shared
       containers:
         - name: studentmang-app
-          image: openjdk:11-jre-slim
-          command: ["java", "-jar", "/app/app.jar"]
+          image: badrftw/student-management:latest
           ports:
             - containerPort: 8080
-          volumeMounts:
-            - name: app-storage
-              mountPath: /app
-              readOnly: true
           env:
             - name: SPRING_DATASOURCE_URL
-              value: "jdbc:mysql://mysql-service.devops.svc.cluster.local:3306/testdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&createDatabaseIfNotExist=true&characterEncoding=UTF-8"
+              value: "jdbc:mysql://mysql-service.devops.svc.cluster.local:3306/testdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&createDatabaseIfNotExist=true"
             - name: SPRING_DATASOURCE_USERNAME
               value: "root"
             - name: SPRING_DATASOURCE_PASSWORD
@@ -54,10 +31,6 @@ spec:
               value: "update"
             - name: SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT
               value: "org.hibernate.dialect.MySQL8Dialect"
-            - name: SPRING_PROFILES_ACTIVE
-              value: "dev"
-            - name: SERVER_PORT
-              value: "8080"
           resources:
             requests:
               memory: "512Mi"
@@ -69,25 +42,14 @@ spec:
             httpGet:
               path: /actuator/health
               port: 8080
-            initialDelaySeconds: 180
+            initialDelaySeconds: 120
             periodSeconds: 10
-            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /actuator/health
               port: 8080
-            initialDelaySeconds: 120
+            initialDelaySeconds: 90
             periodSeconds: 10
-            failureThreshold: 3
-          startupProbe:
-            httpGet:
-              path: /actuator/health
-              port: 8080
-            failureThreshold: 30
-            periodSeconds: 10
-      volumes:
-        - name: app-storage
-          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
