@@ -206,33 +206,31 @@ EOF
         stage('Wait for Application Readiness') {
             steps {
                 script {
-                    // MAUVAIS - cherche spring-app
-                    sh "kubectl get pods -l app=spring-app -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].metadata.name}'"
-
-                    // CORRIGEZ EN :
                     sh """
-            # Essayer avec le bon label
+            # CORRIGER LE LABEL ICI :
             POD_NAME=\$(kubectl get pods -l app=studentmang-app -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
             
-            # Si vide, essayer un autre label ou chercher par nom
+            # Si toujours vide, utiliser une méthode alternative
             if [ -z "\$POD_NAME" ]; then
-                POD_NAME=\$(kubectl get pods -n ${KUBE_NAMESPACE} | grep studentmang-app | head -1 | awk '{print \$1}')
+                echo "⚠️ Aucun pod trouvé avec label app=studentmang-app"
+                echo "Recherche alternative..."
+                POD_NAME=\$(kubectl get pods -n ${KUBE_NAMESPACE} --selector=app=studentmang-app -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
             fi
             
-            echo "Pod name: \$POD_NAME"
-            
-            if [ -n "\$POD_NAME" ]; then
-                kubectl logs \$POD_NAME -n ${KUBE_NAMESPACE} --tail=20
+            if [ -z "\$POD_NAME" ]; then
+                echo "❌ Toujours aucun pod trouvé. Liste complète:"
+                kubectl get pods -n ${KUBE_NAMESPACE} -o wide
+                echo "Déploiements:"
+                kubectl get deployments -n ${KUBE_NAMESPACE}
+                exit 1
             else
-                echo "❌ Aucun pod studentmang-app trouvé"
-                echo "Listing tous les pods:"
-                kubectl get pods -n ${KUBE_NAMESPACE}
+                echo "✅ Pod trouvé: \$POD_NAME"
+                kubectl logs \$POD_NAME -n ${KUBE_NAMESPACE} --tail=20
             fi
             """
                 }
             }
         }
-
         stage('Verify Deployment') {
             steps {
                 script {
