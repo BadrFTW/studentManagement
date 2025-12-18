@@ -207,30 +207,54 @@ EOF
             steps {
                 script {
                     sh """
-            # CORRIGER LE LABEL ICI :
-            POD_NAME=\$(kubectl get pods -l app=studentmang-app -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            # Attendre que le pod passe de ContainerCreating à Running
+            echo "⏳ Attente du démarrage du container..."
             
-            # Si toujours vide, utiliser une méthode alternative
-            if [ -z "\$POD_NAME" ]; then
-                echo "⚠️ Aucun pod trouvé avec label app=studentmang-app"
-                echo "Recherche alternative..."
-                POD_NAME=\$(kubectl get pods -n ${KUBE_NAMESPACE} --selector=app=studentmang-app -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-            fi
+            for i in {1..60}; do
+                POD_STATUS=\$(kubectl get pod studentmang-app-6648c5b4c4-k8cmp -n ${KUBE_NAMESPACE} -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
+                
+                if [ "\$POD_STATUS" = "Running" ]; then
+                    echo "✅ Pod en cours d'exécution"
+                    break
+                elif [ "\$POD_STATUS" = "ContainerCreating" ] || [ "\$POD_STATUS" = "Pending" ]; then
+                    echo "⏳ État: \$POD_STATUS - Attente (\$i/60)..."
+                    sleep 5
+                elif [ "\$POD_STATUS" = "NotFound" ]; then
+                    echo "❌ Pod non trouvé"
+                    break
+                else
+                    echo "⚠️ État inattendu: \$POD_STATUS"
+                    kubectl describe pod studentmang-app-6648c5b4c4-k8cmp -n ${KUBE_NAMESPACE} | tail -20
+                    break
+                fi
+            done
             
-            if [ -z "\$POD_NAME" ]; then
-                echo "❌ Toujours aucun pod trouvé. Liste complète:"
-                kubectl get pods -n ${KUBE_NAMESPACE} -o wide
-                echo "Déploiements:"
-                kubectl get deployments -n ${KUBE_NAMESPACE}
-                exit 1
+            # Vérifier l'état final
+            POD_STATUS=\$(kubectl get pod studentmang-app-6648c5b4c4-k8cmp -n ${KUBE_NAMESPACE} -o jsonpath='{.status.phase}')
+            CONTAINER_STATUS=\$(kubectl get pod studentmang-app-6648c5b4c4-k8cmp -n ${KUBE_NAMESPACE} -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}')
+            
+            if [ "\$POD_STATUS" = "Running" ]; then
+                echo "✅ Affichage des logs..."
+                kubectl logs studentmang-app-6648c5b4c4-k8cmp -n ${KUBE_NAMESPACE} --tail=50
             else
-                echo "✅ Pod trouvé: \$POD_NAME"
-                kubectl logs \$POD_NAME -n ${KUBE_NAMESPACE} --tail=20
+                echo "❌ Pod non prêt. État: \$POD_STATUS"
+                echo "Raison d'attente: \$CONTAINER_STATUS"
+                
+                # Debug avancé
+                echo "=== Debug complet ==="
+                kubectl describe pod studentmang-app-6648c5b4c4-k8cmp -n ${KUBE_NAMESPACE}
+                
+                # Vérifier les événements
+                echo "=== Événements récents ==="
+                kubectl get events -n ${KUBE_NAMESPACE} --field-selector involvedObject.name=studentmang-app-6648c5b4c4-k8cmp
+                
+                exit 1
             fi
             """
                 }
             }
         }
+
         stage('Verify Deployment') {
             steps {
                 script {
