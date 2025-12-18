@@ -15,10 +15,19 @@ spec:
     spec:
       containers:
         - name: studentmang-app
-          image: badrftw/student-management:latest
+          # Option 1 : Utiliser une image avec Java 17
+          image: badrftw/student-management:java17  # Si vous avez taggé une version Java 17
+
+          # Option 2 : Ou utiliser une image Java 17 générique avec votre JAR
+          # image: openjdk:17-jdk-slim
+          # command: ["java", "-jar", "/app/student-management.jar"]
+          # Vous devrez alors monter le JAR via un volume ou le copier dans l'image
+
           ports:
             - containerPort: 8080
           env:
+            - name: JAVA_OPTS
+              value: "-XX:+UseContainerSupport -Dfile.encoding=UTF-8"
             - name: SPRING_DATASOURCE_URL
               value: "jdbc:mysql://mysql-service.devops.svc.cluster.local:3306/testdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&createDatabaseIfNotExist=true"
             - name: SPRING_DATASOURCE_USERNAME
