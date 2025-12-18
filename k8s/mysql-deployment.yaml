@@ -5,8 +5,8 @@ metadata:
   namespace: devops
 type: Opaque
 data:
-  mysql-root-password: cm9vdA==   # "root" encodé en base64
-  mysql-database: dGVzdGRi     # "testdb" encodé en base64
+  mysql-root-password: cm9vdDEyMw==  # "root123"
+  mysql-database: c3ByaW5nZGI=       # "springdb"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
         - name: mysql
-          image: mysql:8
+          image: mysql:8.0
           env:
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:
@@ -37,6 +37,8 @@ spec:
                 secretKeyRef:
                   name: mysql-secret
                   key: mysql-database
+            - name: MYSQL_TCP_PORT
+              value: "3306"
           ports:
             - containerPort: 3306
           volumeMounts:
@@ -44,7 +46,9 @@ spec:
               mountPath: /var/lib/mysql
       volumes:
         - name: mysql-data
-          emptyDir: {}
+          hostPath:
+            path: /data/mysql
+            type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
@@ -58,4 +62,4 @@ spec:
     - protocol: TCP
       port: 3306
       targetPort: 3306
-  clusterIP: None   # pour que Spring résolve facilement mysql-service
+  clusterIP: None

@@ -206,17 +206,29 @@ EOF
         stage('Wait for Application Readiness') {
             steps {
                 script {
-                    // Attendre que l'application Spring Boot soit prête
-                    sh """
-                    kubectl wait --for=condition=ready pod -l app=spring-app -n ${KUBE_NAMESPACE} --timeout=180s || echo "L'application prend plus de temps à démarrer"
-                    """
+                    // MAUVAIS - cherche spring-app
+                    sh "kubectl get pods -l app=spring-app -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].metadata.name}'"
 
-                    // Vérifier les logs de démarrage
+                    // CORRIGEZ EN :
                     sh """
-                    POD_NAME=\$(kubectl get pods -l app=spring-app -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].metadata.name}')
-                    echo "=== Dernières lignes de logs de l'application ==="
-                    kubectl logs \$POD_NAME -n ${KUBE_NAMESPACE} --tail=20 || true
-                    """
+            # Essayer avec le bon label
+            POD_NAME=\$(kubectl get pods -l app=studentmang-app -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            
+            # Si vide, essayer un autre label ou chercher par nom
+            if [ -z "\$POD_NAME" ]; then
+                POD_NAME=\$(kubectl get pods -n ${KUBE_NAMESPACE} | grep studentmang-app | head -1 | awk '{print \$1}')
+            fi
+            
+            echo "Pod name: \$POD_NAME"
+            
+            if [ -n "\$POD_NAME" ]; then
+                kubectl logs \$POD_NAME -n ${KUBE_NAMESPACE} --tail=20
+            else
+                echo "❌ Aucun pod studentmang-app trouvé"
+                echo "Listing tous les pods:"
+                kubectl get pods -n ${KUBE_NAMESPACE}
+            fi
+            """
                 }
             }
         }
