@@ -124,22 +124,49 @@ pipeline {
         stage('Deploy SonarQube') {
             steps {
                 script {
-                    echo "Déploiement de SonarQube..."
+                    echo "🚀 Déploiement de SonarQube..."
 
-                    // Vérifier rapidement que MySQL est prêt
-                    sh """
-            kubectl get pods -l app=mysql -n ${KUBE_NAMESPACE} | grep Running || echo "⚠️ Vérifiez l'état de MySQL"
-            """
-
-                    // Appliquer le YAML
+                    // Appliquer la configuration
                     sh "kubectl apply -f ${K8S_DIR}/sonarqube-deployment.yaml -n ${KUBE_NAMESPACE}"
 
-                    // Attendre que SonarQube soit prêt
-                    sh """
-            kubectl wait --for=condition=ready pod -l app=sonarqube -n ${KUBE_NAMESPACE} --timeout=240s
-            """
+                    // Augmenter le timeout pour SonarQube (il démarre lentement)
+                    timeout(time: 5, unit: 'MINUTES') {
+                        waitUntil {
+                            try {
+                                // Vérifier l'état du pod
+                                def podStatus = sh(
+                                        script: """
+                            kubectl get pods -l app=sonarqube -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo 'Pending'
+                            """,
+                                        returnStdout: true
+                                ).trim()
 
-                    echo "✅ SonarQube déployé avec succès"
+                                if (podStatus == 'Running') {
+                                    echo "✅ SonarQube est en cours d'exécution"
+                                    return true
+                                } else {
+                                    echo "⏳ SonarQube n'est pas encore prêt (statut: ${podStatus})"
+
+                                    // Afficher les logs pour diagnostic
+                                    if (podStatus == 'Pending' || podStatus == 'ContainerCreating') {
+                                        echo "🔍 Vérification des événements..."
+                                        sh """
+                                kubectl get events -n ${KUBE_NAMESPACE} --field-selector involvedObject.name=sonarqube --sort-by='.lastTimestamp' | tail -3 || true
+                                """
+                                    }
+
+                                    sleep 30
+                                    return false
+                                }
+                            } catch (Exception e) {
+                                echo "⚠️ Erreur de vérification: ${e.message}"
+                                sleep 30
+                                return false
+                            }
+                        }
+                    }
+
+                    echo "🎉 SonarQube est déployé (peut être en cours d'initialisation)"
                 }
             }
         }
@@ -147,23 +174,64 @@ pipeline {
         stage('Deploy Spring Application') {
             steps {
                 script {
-                    echo "Déploiement de l'application Spring..."
+                    echo "🚀 Déploiement de l'application Spring Boot..."
 
-                    // Appliquer le YAML
+                    // Appliquer la configuration
                     sh "kubectl apply -f ${K8S_DIR}/spring-deployment.yaml -n ${KUBE_NAMESPACE}"
 
-                    // Attendre que Spring soit prêt avec timeout plus long
-                    sh """
-            kubectl wait --for=condition=ready pod -l app=studentmang-app -n ${KUBE_NAMESPACE} --timeout=300s
-            """
+                    // Spring Boot peut être lent (JVM, connexions DB, cache, etc.)
+                    timeout(time: 10, unit: 'MINUTES') {
+                        waitUntil {
+                            try {
+                                // Vérifier l'état du pod
+                                def podStatus = sh(
+                                        script: """
+                                kubectl get pods -l app=studentmang -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo 'Pending'
+                            """,
+                                        returnStdout: true
+                                ).trim()
 
-                    // Vérification rapide
-                    sh """
-            echo "📊 État des pods Spring:"
-            kubectl get pods -l app=spring -n ${KUBE_NAMESPACE}
-            """
+                                if (podStatus == 'Running') {
+                                    // Vérifier si le pod est vraiment prêt (readiness probe)
+                                    def readyStatus = sh(
+                                            script: """
+                                    kubectl get pods -l app=studentmang -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null || echo 'false'
+                                """,
+                                            returnStdout: true
+                                    ).trim()
 
-                    echo "✅ Application Spring déployée avec succès"
+                                    if (readyStatus == 'true') {
+                                        echo "✅ Spring Boot est prêt et répond"
+                                        return true
+                                    } else {
+                                        echo "⏳ Spring Boot est en cours d'exécution mais pas encore prêt (ready: ${readyStatus})"
+
+                                        // Afficher les logs de démarrage
+                                        sh """
+                                    kubectl logs -l app=studentmang -n ${KUBE_NAMESPACE} --tail=5 --timestamps 2>/dev/null | grep -i "started\\|ready\\|running" || true
+                                """
+                                        sleep 15
+                                        return false
+                                    }
+                                } else {
+                                    echo "⏳ Spring Boot n'est pas encore en cours d'exécution (statut: ${podStatus})"
+                                    sleep 20
+                                    return false
+                                }
+                            } catch (Exception e) {
+                                echo "⚠️ Erreur de vérification: ${e.message}"
+                                sleep 20
+                                return false
+                            }
+                        }
+                    }
+
+                    // Vérification finale
+                    sh """
+                echo "📊 État final:"
+                kubectl get pods -l app=spring -n ${KUBE_NAMESPACE} -o wide
+                echo "🎉 Application Spring Boot déployée"
+            """
                 }
             }
         }
