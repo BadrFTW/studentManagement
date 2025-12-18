@@ -15,39 +15,28 @@ spec:
     spec:
       containers:
         - name: sonarqube
-          image: sonarqube:lts-community
+          image: sonarqube:lts
           ports:
             - containerPort: 9000
-          env:
-            - name: SONAR_WEB_JAVAOPTS
-              value: "-Xmx512m -Xms128m"
           resources:
             requests:
-              memory: "1Gi"
-              cpu: "500m"
-            limits:
               memory: "2Gi"
               cpu: "1000m"
+            limits:
+              memory: "4Gi"
+              cpu: "2"
           readinessProbe:
             httpGet:
-              path: /api/system/status
+              path: /about
               port: 9000
-            initialDelaySeconds: 90
-            periodSeconds: 20
+            initialDelaySeconds: 60   # temps d’attente avant le check
+            periodSeconds: 15         # fréquence de vérification
           volumeMounts:
             - name: sonarqube-data
               mountPath: /opt/sonarqube/data
-            - name: sonarqube-extensions
-              mountPath: /opt/sonarqube/extensions
       volumes:
         - name: sonarqube-data
-          hostPath:
-            path: /data/sonarqube/data
-            type: DirectoryOrCreate
-        - name: sonarqube-extensions
-          hostPath:
-            path: /data/sonarqube/extensions
-            type: DirectoryOrCreate
+          emptyDir: {}   # ⚠️ à remplacer par un PVC si tu veux de la persistance
 ---
 apiVersion: v1
 kind: Service
@@ -61,5 +50,5 @@ spec:
     - protocol: TCP
       port: 9000
       targetPort: 9000
-      nodePort: 30090
+      nodePort: 32000
   type: NodePort

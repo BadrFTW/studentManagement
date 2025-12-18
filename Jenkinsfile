@@ -161,7 +161,7 @@ pipeline {
 
                     // Attendre que Spring soit prêt avec timeout plus long
                     sh """
-            kubectl wait --for=condition=ready pod -l app=spring -n ${KUBE_NAMESPACE} --timeout=300s
+            kubectl wait --for=condition=ready pod -l app=studentmang-app -n ${KUBE_NAMESPACE} --timeout=300s
             """
 
                     // Vérification rapide
