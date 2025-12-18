@@ -96,15 +96,8 @@ pipeline {
         stage('Create Kubernetes Namespace') {
             steps {
                 script {
-                    // Créer le namespace devops s'il n'existe pas
-                    sh """
-                    cat <<EOF | kubectl apply -f -
-                    apiVersion: v1
-                    kind: Namespace
-                    metadata:
-                    name: ${KUBE_NAMESPACE}
-                    EOF
-                    """
+                    // Créer le namespace (ignore l'erreur s'il existe déjà)
+                    sh "kubectl create namespace ${KUBE_NAMESPACE} || true"
                 }
             }
         }
