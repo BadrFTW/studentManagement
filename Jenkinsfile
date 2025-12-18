@@ -180,7 +180,50 @@ pipeline {
                     sh "kubectl apply -f ${K8S_DIR}/spring-deployment.yaml -n ${KUBE_NAMESPACE}"
 
                     // Spring Boot peut être lent (JVM, connexions DB, cache, etc.)
+                    timeout(time: 10, unit: 'MINUTES') {
+                        waitUntil {
+                            try {
+                                // Vérifier l'état du pod
+                                def podStatus = sh(
+                                        script: """
+                                kubectl get pods -l app=studentmang-app -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo 'Pending'
+                            """,
+                                        returnStdout: true
+                                ).trim()
 
+                                if (podStatus == 'Running') {
+                                    // Vérifier si le pod est vraiment prêt (readiness probe)
+                                    def readyStatus = sh(
+                                            script: """
+                                    kubectl get pods -l app=studentmang-app -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null || echo 'false'
+                                """,
+                                            returnStdout: true
+                                    ).trim()
+
+                                    if (readyStatus == 'true') {
+                                        echo "✅ Spring Boot est prêt et répond"
+                                        return true
+                                    } else {
+                                        echo "⏳ Spring Boot est en cours d'exécution mais pas encore prêt (ready: ${readyStatus})"
+
+                                        // Afficher les logs de démarrage
+                                        sh """
+                                    kubectl logs -l app=studentmang-app -n ${KUBE_NAMESPACE} --tail=5 --timestamps 2>/dev/null | grep -i "started\\|ready\\|running" || true
+                                """
+                                        sleep 15
+                                        return false
+                                    }
+                                } else {
+                                    echo "⏳ Spring Boot n'est pas encore en cours d'exécution (statut: ${podStatus})"
+                                    sleep 20
+                                    return false
+                                }
+                            } catch (Exception e) {
+                                echo "⚠️ Erreur de vérification: ${e.message}"
+                                sleep 20
+                                return false
+                            }
+                        }
                     }
 
                     // Vérification finale
