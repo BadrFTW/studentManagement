@@ -4,7 +4,7 @@ metadata:
   name: studentmang-app
   namespace: devops
 spec:
-  replicas: 1  # 1 seule réplique pour Minikube
+  replicas: 1
   selector:
     matchLabels:
       app: studentmang-app
@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: studentmang-app
-          image: badrftw/student-management:latest
+          image: badrftw/student-management:java17  # Votre nouvelle image
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -30,29 +30,15 @@ spec:
               value: "update"
             - name: SERVER_PORT
               value: "8080"
-            - name: JAVA_OPTS
+            - name: JAVA_TOOL_OPTIONS
               value: "-Xmx512m -Xms256m -XX:+UseG1GC"
-          readinessProbe:
-            httpGet:
-              path: /actuator/health
-              port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            failureThreshold: 3
-          livenessProbe:
-            httpGet:
-              path: /actuator/health
-              port: 8080
-            initialDelaySeconds: 45
-            periodSeconds: 15
-            failureThreshold: 3
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "100m"
-            limits:
               memory: "512Mi"
               cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
 ---
 apiVersion: v1
 kind: Service
