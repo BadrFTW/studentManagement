@@ -11,7 +11,7 @@ pipeline {
         SONAR_HOST_URL = 'http://localhost:9000'
         SONAR_TOKEN = credentials('sonarqube-token')
         KUBE_NAMESPACE = 'devops'
-        K8S_DIR = 'k8s'  // Dossier contenant vos fichiers YAML
+        K8S_DIR = 'k8s'
     }
 
     stages {
