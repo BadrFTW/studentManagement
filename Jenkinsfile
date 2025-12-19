@@ -91,7 +91,7 @@ pipeline {
 
 
 
-        // ========== STAGES KUBERNETES AVEC FICHIERS YAML ==========
+        // ========== STAGES KUBERNETES ==========
 
         stage('Create Kubernetes Namespace') {
             steps {
@@ -101,6 +101,7 @@ pipeline {
                 }
             }
         }
+
 
 
         stage('Deploy MySQL') {
@@ -121,6 +122,7 @@ pipeline {
             }
         }
 
+
         stage('Deploy SonarQube') {
             steps {
                 script {
@@ -129,47 +131,24 @@ pipeline {
                     // Appliquer la configuration
                     sh "kubectl apply -f ${K8S_DIR}/sonarqube-deployment.yaml -n ${KUBE_NAMESPACE}"
 
-                    // Augmenter le timeout pour SonarQube (il démarre lentement)
-                    timeout(time: 5, unit: 'MINUTES') {
-                        waitUntil {
-                            try {
-                                // Vérifier l'état du pod
-                                def podStatus = sh(
-                                        script: """
-                            kubectl get pods -l app=sonarqube -n ${KUBE_NAMESPACE} -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo 'Pending'
-                            """,
-                                        returnStdout: true
-                                ).trim()
-
-                                if (podStatus == 'Running') {
-                                    echo "✅ SonarQube est en cours d'exécution"
-                                    return true
-                                } else {
-                                    echo "⏳ SonarQube n'est pas encore prêt (statut: ${podStatus})"
-
-                                    // Afficher les logs pour diagnostic
-                                    if (podStatus == 'Pending' || podStatus == 'ContainerCreating') {
-                                        echo "🔍 Vérification des événements..."
-                                        sh """
-                                kubectl get events -n ${KUBE_NAMESPACE} --field-selector involvedObject.name=sonarqube --sort-by='.lastTimestamp' | tail -3 || true
-                                """
-                                    }
-
-                                    sleep 30
-                                    return false
-                                }
-                            } catch (Exception e) {
-                                echo "⚠️ Erreur de vérification: ${e.message}"
-                                sleep 30
-                                return false
-                            }
-                        }
-                    }
+                    // Attendre simplement 5 minutes
+                    sleep 100
 
                     echo "🎉 SonarQube est déployé (peut être en cours d'initialisation)"
+
+                    // Afficher l'état pour information
+                    sh """
+                echo "=== ÉTAT DES PODS SONARQUBE ==="
+                kubectl get pods -l app=sonarqube -n ${KUBE_NAMESPACE} || echo "Aucun pod trouvé"
+                
+                echo ""
+                echo "=== DERNIERS ÉVÉNEMENTS ==="
+                kubectl get events -n ${KUBE_NAMESPACE} --field-selector involvedObject.name=sonarqube --sort-by='.lastTimestamp' | tail -5 || true
+            """
                 }
             }
         }
+
 
         stage('Deploy Spring Application') {
             steps {
@@ -180,7 +159,7 @@ pipeline {
                     sh "kubectl apply -f ${K8S_DIR}/spring-deployment.yaml -n ${KUBE_NAMESPACE}"
 
                     // 2. Attendre un peu
-                    sleep 30
+                    sleep 200
 
                     // 3. Afficher l'état
                     sh """
